@@ -86,6 +86,9 @@ function run() {
                     if (saveToEnvironment) {
                         core.info(`Exporting variable ${name}`);
                         core.exportVariable(name, parameter.Value);
+                        if (parameter.Value && parameter.Type === 'SecureString') {
+                            core.setSecret(parameter.Value);
+                        }
                     }
                 }
                 if (saveToEnvironment) {
