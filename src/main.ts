@@ -1,6 +1,14 @@
 import * as core from '@actions/core'
 import {writeFileSync} from 'fs'
-import {GetParametersByPathCommand, SSMClient} from '@aws-sdk/client-ssm'
+import {
+  GetParametersByPathCommand,
+  GetParametersByPathCommandOutput,
+  SSMClient
+} from '@aws-sdk/client-ssm'
+
+interface ExWithMessage {
+  message: string
+}
 
 async function run(): Promise<void> {
   try {
@@ -14,37 +22,44 @@ async function run(): Promise<void> {
     const params = {} as any
 
     for (const path of paths) {
-      const result = await ssm.send(
-        new GetParametersByPathCommand({
-          Path: path,
-          Recursive: JSON.parse(core.getInput('recursive', {required: true})),
-          WithDecryption: JSON.parse(core.getInput('decrypt', {required: true}))
-        })
-      )
+      let token: string | undefined
+      do {
+        const result: GetParametersByPathCommandOutput = await ssm.send(
+          new GetParametersByPathCommand({
+            Path: path,
+            Recursive: JSON.parse(core.getInput('recursive', {required: true})),
+            NextToken: token,
+            WithDecryption: JSON.parse(
+              core.getInput('decrypt', {required: true})
+            )
+          })
+        )
 
-      if (saveToEnvironment) {
-        core.startGroup(`Exporting from Path ${path}`)
-      }
-
-      for (const parameter of result.Parameters!) {
-        let name = parameter.Name?.replace(path, '')
-          .toUpperCase()
-          .replace(/\//g, delimiter)
-          .replace(/-/g, '_')
-        name = `${prefix}${name}`
-        params[name] = parameter.Value
         if (saveToEnvironment) {
-          core.info(`Exporting variable ${name}`)
-          core.exportVariable(name, parameter.Value)
-          if (parameter.Value && parameter.Type === 'SecureString') {
-            core.setSecret(parameter.Value)
+          core.startGroup(`Exporting from Path ${path}`)
+        }
+
+        for (const parameter of result.Parameters!) {
+          let name = parameter.Name?.replace(path, '')
+            .toUpperCase()
+            .replace(/\//g, delimiter)
+            .replace(/-/g, '_')
+          name = `${prefix}${name}`
+          params[name] = parameter.Value
+          if (saveToEnvironment) {
+            core.info(`Exporting variable ${name}`)
+            core.exportVariable(name, parameter.Value)
+            if (parameter.Value && parameter.Type === 'SecureString') {
+              core.setSecret(parameter.Value)
+            }
           }
         }
-      }
 
-      if (saveToEnvironment) {
-        core.endGroup()
-      }
+        if (saveToEnvironment) {
+          core.endGroup()
+        }
+        token = result.NextToken
+      } while (token !== undefined)
     }
 
     const fileName = core.getInput('file', {required: false})
@@ -61,7 +76,8 @@ async function run(): Promise<void> {
     }
 
     core.setOutput('ssm-params', JSON.stringify(params))
-  } catch (error) {
+  } catch (e) {
+    const error = e as ExWithMessage
     core.setFailed(error.message)
   }
 }
