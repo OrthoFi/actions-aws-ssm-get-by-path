@@ -62,14 +62,13 @@ runs:
             foreach ($parameter in $parameters.Parameters) {
                 $name = $parameter.Name.Replace($path, "").ToUpper().Replace("/", $delimiter).Replace("-", "_")
                 $name = "$($prefix)$($name)"
-                $value = $($parameter.Value | ConvertTo-Json -Compress)
-                $result[$name] = $value
+                $result[$name] = $parameter.Value
                 if ($saveToEnvironment) {
                     if ($parameter.Type -eq "SecureString") {
-                        Write-Output "::add-mask::$($value)"
+                        Write-Output "::add-mask::$($parameter.Value)"
                     }
 
-                    Write-Output "$name=$($value)" >> $env:GITHUB_ENV
+                    Write-Output "$name=$($parameter.Value | ConvertTo-Json -Compress)" >> $env:GITHUB_ENV
                 }
             }
         }
