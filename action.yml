@@ -1,34 +1,81 @@
 name: AWS SSM Get by Path
 description: Get AWS SSM parameters by path
 inputs:
-  paths:
-    description: Paths to retrieve parameters by. Subsequent paths should be comma delimited
-    required: true
-  recursive:
-    description: Get parameters recursively
-    required: true
-    default: false
   decrypt:
+    default: "false"
     description: Indicates if retrieved parameters should be decrypted
     required: true
-    default: false
-  save-to-environment:
-    description: Indicates if the retrieved parameters should also be exported as environment variables
+
+  delimiter:
+    default: _
+    description: Delimiter to use for subkeys
     required: true
-    default: false
-  prefix:
-    description: Prefix, if any, to apply before exporting environment variables
-    required: false
+
   file:
     description: Environment variable file to output to
     required: false
-  delimiter:
-    description: Delimiter to use for subkeys
+
+  paths:
+    description: Paths to retrieve parameters by. Subsequent paths should be comma delimited
     required: true
-    default: _
+
+  prefix:
+    description: Prefix, if any, to apply before exporting environment variables
+    required: false
+
+  recursive:
+    default: "false"
+    description: Get parameters recursively
+    required: true
+
+  save-to-environment:
+    default: "false"
+    description: Indicates if the retrieved parameters should also be exported as environment variables
+    required: true
+
 outputs:
   ssm-params:
     description: The retrieved parameters as a JSON object
+    value: ${{ steps.get-ssm-parameters.outputs.ssm-params }}
+
 runs:
-  using: 'node12'
-  main: 'dist/index.js'
+  using: composite
+  steps:
+    - name: Get SSM Parameters
+      id: get-ssm-parameters
+      shell: pwsh
+      run: |
+        $paths = '${{ inputs.paths }}'.Split(',')
+        $saveToEnvironment = [System.Convert]::ToBoolean('${{ inputs.save-to-environment }}')
+        $prefix = '${{ inputs.prefix }}'
+        $delimiter = '${{ inputs.delimiter }}'
+        $recursive = [System.Convert]::ToBoolean('${{ inputs.recursive }}')
+        $decrypt = [System.Convert]::ToBoolean('${{ inputs.decrypt }}')
+
+        $result = @{}
+
+        foreach ($path in $paths) {
+            $parameters = ConvertFrom-Json $($(aws ssm get-parameters-by-path --path $path `
+                        "$($decrypt ? "--with-decryption" : "--no-with-decryption")" `
+                        "$($recursive ? "--recursive" : "--no-recursive")") -join '')
+
+            foreach ($parameter in $parameters.Parameters) {
+                $name = $parameter.Name.Replace($path, "").ToUpper().Replace("/", $delimiter).Replace("-", "_")
+                $name = "$($prefix)$($name)"
+                $result[$name] = $parameter.Value
+                if ($saveToEnvironment) {
+                    if ($parameter.Type -eq "SecureString") {
+                        Write-Output "::add-mask::$($parameter.Value)"
+                    }
+
+                    Write-Output "$name=$($parameter.Value)" >> $env:GITHUB_ENV
+                }
+            }
+        }
+
+        Write-Output "ssm-params=$($result | ConvertTo-Json -Compress)" >> $env:GITHUB_OUTPUT
+
+        $fileName = '${{ inputs.file }}'
+        if ($fileName) {
+            $result.Keys | Foreach-Object { "$_=$($result[$_])" } | Out-File $fileName
+        }
