@@ -62,7 +62,7 @@ runs:
             foreach ($parameter in $parameters.Parameters) {
                 $name = $parameter.Name.Replace($path, "").ToUpper().Replace("/", $delimiter).Replace("-", "_")
                 $name = "$($prefix)$($name)"
-                $result[$name] = $parameter.Value
+                $result[$name] = $($parameter.Value | ConvertTo-Json -Compress)
                 if ($saveToEnvironment) {
                     if ($parameter.Type -eq "SecureString") {
                         Write-Output "::add-mask::$($parameter.Value)"
