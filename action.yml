@@ -68,7 +68,7 @@ runs:
                         Write-Output "::add-mask::$($parameter.Value)"
                     }
 
-                    Write-Output "$name=$($parameter.Value | ConvertTo-Json -Compress)" >> $env:GITHUB_ENV
+                    Write-Output "$name='$parameter.Value'" >> $env:GITHUB_ENV
                 }
             }
         }
