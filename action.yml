@@ -54,28 +54,41 @@ runs:
 
         $result = @{}
 
-        foreach ($path in $paths) {
-            $parameters = ConvertFrom-Json $($(aws ssm get-parameters-by-path --path $path `
-                        "$($decrypt ? "--with-decryption" : "--no-with-decryption")" `
-                        "$($recursive ? "--recursive" : "--no-recursive")") -join '')
+        try {
+            foreach ($path in $paths) {
+                Write-Host "Fetching SSM parameters for path: $path"
+                $parameters = ConvertFrom-Json $($(aws ssm get-parameters-by-path --path $path `
+                            "$($decrypt ? "--with-decryption" : "--no-with-decryption")" `
+                            "$($recursive ? "--recursive" : "--no-recursive")") -join '')
 
-            foreach ($parameter in $parameters.Parameters) {
-                $name = $parameter.Name.Replace($path, "").ToUpper().Replace("/", $delimiter).Replace("-", "_")
-                $name = "$($prefix)$($name)"
-                $result[$name] = $parameter.Value
-                if ($saveToEnvironment) {
-                    if ($parameter.Type -eq "SecureString") {
-                        Write-Output "::add-mask::$($parameter.Value)"
+                Write-Host "Number of parameters fetched: $($parameters.Parameters.Count)"
+
+                foreach ($parameter in $parameters.Parameters) {
+                    $name = $parameter.Name.Replace($path, "").ToUpper().Replace("/", $delimiter).Replace("-", "_")
+                    $name = "$($prefix)$($name)"
+                    $result[$name] = $parameter.Value
+
+                    if ($saveToEnvironment) {
+                        if ($parameter.Type -eq "String") {
+                            Write-Host "Creating ENV var (String Type) : $name = $($parameter.Value)"
+                        } elseif ($parameter.Type -eq "SecureString") {
+                            Write-Host "Creating ENV var (SecureString Type): $name = [Sensitive Data]"
+                            Write-Output "::add-mask::$($parameter.Value)"
+                        }
+
+                        Write-Output "$name=$($parameter.Value)" >> $env:GITHUB_ENV
                     }
-
-                    Write-Output "$name=$($parameter.Value)" >> $env:GITHUB_ENV
                 }
             }
-        }
 
-        Write-Output "ssm-params=$($result | ConvertTo-Json -Compress)" >> $env:GITHUB_OUTPUT
+            Write-Host "Successfully fetched all parameters."
+            Write-Output "ssm-params=$($result | ConvertTo-Json -Compress)" >> $env:GITHUB_OUTPUT
 
-        $fileName = '${{ inputs.file }}'
-        if ($fileName) {
-            $result.Keys | Foreach-Object { "$_=$($result[$_])" } | Out-File $fileName
+            $fileName = '${{ inputs.file }}'
+            if ($fileName) {
+                $result.Keys | Foreach-Object { "$_=$($result[$_])" } | Out-File $fileName
+            }
+        } catch {
+            Write-Host "An error occurred: $_"
+            exit 1
         }
